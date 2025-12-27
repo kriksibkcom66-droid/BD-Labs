@@ -401,7 +401,7 @@ $BODY$;
 ALTER FUNCTION firsovyury2271.trg_audit_sale_simple()
     OWNER TO student;
 ```
-# 3.Триггер каскадного удаления
+### 3.Триггер каскадного удаления
 ```sql
 CREATE OR REPLACE FUNCTION firsovyury2271.trg_cascade_delete_buyer()
     RETURNS trigger
