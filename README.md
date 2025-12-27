@@ -365,41 +365,59 @@ TABLESPACE pg_default;
 ALTER TABLE IF EXISTS firsovyury2271.sale_audit_log
     OWNER to student;
 ```
-### 2.Функция аудита
+### 2.Функция для аудита изменений
 ```sql
-CREATE OR REPLACE FUNCTION firsovyury2271.get_sales_report(
-	p_date_from date DEFAULT '2020-01-01'::date,
-	p_date_to date DEFAULT '2030-12-31'::date)
-    RETURNS TABLE("Номер продажи" bigint, "Дата продажи" date, "Цвет растения" text, "Вид растения" text, "Цена, ₽" integer, "Оплачено покупателем, ₽" numeric, "Долг, ₽" numeric, "Статус" text) 
-    LANGUAGE 'sql'
+CREATE OR REPLACE FUNCTION firsovyury2271.trg_audit_sale_simple()
+    RETURNS trigger
+    LANGUAGE 'plpgsql'
     COST 100
-    STABLE PARALLEL UNSAFE
-    ROWS 1000
-
+    VOLATILE NOT LEAKPROOF
 AS $BODY$
-    SELECT 
-        sa.sale_id                                      AS "Номер продажи",
-        sa.sale_date                                    AS "Дата продажи",
-        p.plant_color                                   AS "Цвет растения",
-        sp.species_name                                 AS "Вид растения",
-        p.price                                         AS "Цена, ₽",
-        COALESCE(b.buyer_paid::numeric, 0)              AS "Оплачено покупателем, ₽",
-        (p.price - COALESCE(b.buyer_paid::numeric, 0))  AS "Долг, ₽",
-        CASE 
-            WHEN COALESCE(b.buyer_paid::numeric, 0) >= p.price THEN 'Оплачено полностью'
-            WHEN COALESCE(b.buyer_paid::numeric, 0) > 0          THEN 'Частичная оплата'
-            ELSE 'Не оплачено'
-        END                                             AS "Статус"
-    FROM firsovyury2271.sale sa
-    JOIN firsovyury2271.plant p    ON sa.plant_id = p.plants_id
-    JOIN firsovyury2271.specie sp   ON p.species_id = sp.species_id
-    JOIN firsovyury2271.buyer b     ON sa.buyer_id = b.buyer_id
-    WHERE sa.sale_date BETWEEN p_date_from AND p_date_to
-    ORDER BY sa.sale_date DESC, sa.sale_id DESC;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO firsovyury2271.sale_audit_log (operation, sale_id, details)
+        VALUES ('INSERT', NEW.sale_id, 
+                'Добавлена продажа растения ' || NEW.plant_id || 
+                ' покупателю ' || NEW.buyer_id || 
+                ' от ' || NEW.sale_date);
+
+    ELSIF TG_OP = 'UPDATE' THEN
+        INSERT INTO firsovyury2271.sale_audit_log (operation, sale_id, details)
+        VALUES ('UPDATE', NEW.sale_id, 
+                'Изменена дата с ' || OLD.sale_date || ' на ' || NEW.sale_date);
+
+    ELSIF TG_OP = 'DELETE' THEN
+        INSERT INTO firsovyury2271.sale_audit_log (operation, sale_id, details)
+        VALUES ('DELETE', OLD.sale_id, 
+                'Удалена продажа растения ' || OLD.plant_id || 
+                ' от ' || OLD.sale_date);
+        RETURN OLD;
+    END IF;
+
+    RETURN NULL;
+END;
 $BODY$;
 
-ALTER FUNCTION firsovyury2271.get_sales_report(date, date)
+ALTER FUNCTION firsovyury2271.trg_audit_sale_simple()
     OWNER TO student;
 ```
-### 3.Триггеры аудита для всех таблиц
+# 3.Триггер каскадного удаления
+```sql
+CREATE OR REPLACE FUNCTION firsovyury2271.trg_cascade_delete_buyer()
+    RETURNS trigger
+    LANGUAGE 'plpgsql'
+    COST 100
+    VOLATILE NOT LEAKPROOF
+AS $BODY$
+BEGIN
+    DELETE FROM firsovyury2271.buyer 
+    WHERE buyer_id = OLD.buyer_id;
+    
+    RAISE NOTICE 'Каскадное удаление: удалены все продажи покупателя ID = %', OLD.buyer_id;
+    RETURN OLD;
+END;
+$BODY$;
+
+ALTER FUNCTION firsovyury2271.trg_cascade_delete_buyer()
+    OWNER TO student;
 ```
